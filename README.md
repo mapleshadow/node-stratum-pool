@@ -2,11 +2,12 @@ High performance Stratum poolserver in Node.js. One instance of this software ca
 pools, each with their own daemon and stratum port :)
 
 #### Notice
-This project does not do any payment processing. For a full featured portal that uses this module, see
-[NOMP (Node Open Mining Portal)](https://github.com/zone117x/node-open-mining-portal). It handles payments, website
-front-end, database layer, mutli-coin/pool support, auto-switching miners between coins/pools, etc.. The portal also
-has an [MPOS](https://github.com/MPOS/php-mpos) compatibility mode so that the it can function as a drop-in-replacement
-for [python-stratum-mining](https://github.com/Crypto-Expert/stratum-mining).
+This is a module for Node.js that will do nothing on its own. Unless you're a Node.js developer who would like to
+handle stratum authentication and raw share data then this module will not be of use to you. For a full featured portal
+that uses this module, see [NOMP (Node Open Mining Portal)](https://github.com/zone117x/node-open-mining-portal). It
+handles payments, website front-end, database layer, mutli-coin/pool support, auto-switching miners between coins/pools,
+etc.. The portal also has an [MPOS](https://github.com/MPOS/php-mpos) compatibility mode so that the it can function as
+a drop-in-replacement for [python-stratum-mining](https://github.com/Crypto-Expert/stratum-mining).
 
 
 [![Build Status](https://travis-ci.org/zone117x/node-stratum-pool.png?branch=master)](https://travis-ci.org/zone117x/node-stratum-pool)
@@ -25,6 +26,7 @@ Features
 * Daemon RPC interface
 * Stratum TCP socket server
 * Block template / job manager
+* P2P to get block notifications as peer node
 * Optimized generation transaction building
 * Connecting to multiple daemons for redundancy
 * Process share submissions
@@ -41,23 +43,23 @@ Features
 * ✓ __Scrypt-Jane__ (YaCoin, CopperBars, Pennies, Tickets, etc..)
 * ✓ __Scrypt-N__ (Vertcoin [VTC])
 * ✓ __Quark__ (Quarkcoin [QRK])
-* ✓ __X11__ (Darkcoin [DRK])
+* ✓ __X11__ (Darkcoin [DRK], Hirocoin, Limecoin)
+* ✓ __Keccak__ (Maxcoin [MAX], HelixCoin, CryptoMeth, Galleon, 365coin, Slothcoin, BitcointalkCoin)
+* ✓ __Skein__ (Skeincoin [SKC])
+* ✓ __Groestl__ (Groestlcoin [GRS])
+
+May be working (needs additional testing):
+* ? *Blake* (Blakecoin [BLC])
+* ? *Fugue* (Fuguecoin [FC])
+* ? *Qubit* (Qubitcoin [Q2C], Myriadcoin [MYR])
+* ? *Hefty1* (Heavycoin [HVC])
+* ? *SHAvite-3* (INKcoin [INK])
+
+Not working currently:
+* *Groestl* - for Myriadcoin
+* *Keccak* - for eCoin & Copperlark
 
 
-Under development:
-* ✗ *Keccak* (CopperLark [CLR])
-* ✗ *Max* (Maxcoin [MAX], HelixCoin [HXC])
-* ✗ *Skein* (Skeincoin [SKC])
-* ✗ *Bcrypt* (Taojingcoin [TJC])
-* ✗ *Hefty1* (Heavycoin [HVC])
-* ✗ *Blake* (Blakecoin [BLC])
-* ✗ *Fugue* (Fuguecoin [FC])
-* ✗ *SHAvite-3* (INKcoin [INK])
-
-
-#### Under development
-
-* P2P functionality for highly efficient block updates from daemon as a peer node
 
 Requirements
 ------------
@@ -79,12 +81,24 @@ npm update
 
 Create the configuration for your coin:
 
+Possible options for `algorithm`: *sha256, scrypt, scrypt-jane, scrypt-n, quark, x11, keccak, blake,
+skein, groestl, fugue, shavite3, hefty1, or qubit*.
+
 ```javascript
 var myCoin = {
     "name": "Dogecoin",
     "symbol": "DOGE",
-    "algorithm": "scrypt", //or "sha256", "scrypt-jane", "scrypt-n", "quark", "x11"
-    "txMessages": false, //or true (not required, defaults to false)
+    "algorithm": "scrypt",
+    "nValue": 1024, //optional - defaults to 1024
+    "rValue": 1, //optional - defaults to 1
+    "txMessages": false, //optional - defaults to false,
+
+    /* Magic value only required for setting up p2p block notifications. It is found in the daemon
+       source code as the pchMessageStart variable.
+       For example, litecoin mainnet magic: http://git.io/Bi8YFw
+       And for litecoin testnet magic: http://git.io/NXBYJA */
+     "peerMagic": "fbc0b6db" //optional
+     "peerMagicTestnet": "fcc1b7dc" //optional
 };
 ```
 
@@ -107,8 +121,8 @@ var myCoin = {
     "name": "Execoin",
     "symbol": "EXE",
     "algorithm": "scrypt-n",
-    /* This defaults to Vertcoin's timetable if not used. It is required for scrypt-n coins that have
-       modified their N-factor timetable to be different than Vertcoin's. */
+    /* This defaults to Vertcoin's timetable if not used. It is required for scrypt-n coins that
+       have modified their N-factor timetable to be different than Vertcoin's. */
     "timeTable": {
         "2048": 1390959880,
         "4096": 1438295269,
@@ -122,6 +136,21 @@ var myCoin = {
 };
 ```
 
+If you are using the `keccak` algorithm there are additional configurations *(The rare `normalHashing` keccak coins
+such as Copperlark and eCoin don't appear to work yet - only the popular ones like Maxcoin are)*:
+```javascript
+var myCoin = {
+    "name": "eCoin",
+    "symbol": "ECN",
+    "algorithm": "keccak",
+
+    /* This is not required and set to false by default. Some coins such as Copperlark and eCoin
+       require it to be set to true. Maxcoin and most others are false. */
+    "normalHashing": true
+};
+```
+
+
 Create and start new pool with configuration options and authentication function
 
 ```javascript
@@ -132,14 +161,25 @@ var pool = Stratum.createPool({
     "coin": myCoin,
 
     "address": "mi4iBXbBsydtcc5yFmsff2zCFVX4XG7qJc", //Address to where block rewards are given
+
+    /* Block rewards go to the configured pool wallet address to later be paid out to miners,
+       except for a percentage that can go to, for examples, pool operator(s) as pool fees or
+       or to donations address. Addresses or hashed public keys can be used. Here is an example
+       of rewards going to the main pool op, a pool co-owner, and NOMP donation. */
+    "rewardRecipients": {
+        "n37vuNFkXfk15uFnGoVyHZ6PYQxppD3QqK": 1.5, //1.5% goes to pool op
+        "mirj3LtZxbSTharhtXvotqtJXUY7ki5qfx": 0.5, //0.5% goes to a pool co-owner
+
+        /* 0.1% donation to NOMP. This pubkey can accept any type of coin, please leave this in
+           your config to help support NOMP development. */
+        "22851477d63a085dbc2398c8430af1c09e7343f6": 0.1
+    },
+
     "blockRefreshInterval": 1000, //How often to poll RPC daemons for new blocks, in milliseconds
 
-    /* How many milliseconds should have passed before new block transactions will trigger a new
-       job broadcast. */
-    "txRefreshInterval": 20000,
 
-    /* Some miner software is bugged and will consider the pool offline if it doesn't receive
-       anything for around a minute, so every time we broadcast jobs, set a timeout to rebroadcast
+    /* Some miner apps will consider the pool dead/offline if it doesn't receive anything new jobs
+       for around a minute, so every time we broadcast jobs, set a timeout to rebroadcast
        in this many seconds unless we find a new job. Set to zero or remove to disable this. */
     "jobRebroadcastTimeout": 55,
 
@@ -153,14 +193,15 @@ var pool = Stratum.createPool({
     /* Sometimes you want the block hashes even for shares that aren't block candidates. */
     "emitInvalidBlockHashes": false,
 
-    /* We use proper maximum algorithm difficulties found in the coin daemon source code. Most
-       miners/pools that deal with scrypt use a guesstimated one that is about 5.86% off from the
-       actual one. So here we can set a tolerable threshold for if a share is slightly too low
-       due to mining apps using incorrect max diffs and this pool using correct max diffs. */
-    "shareVariancePercent": 10,
+    /* Enable for client IP addresses to be detected when using a load balancer with TCP proxy
+       protocol enabled, such as HAProxy with 'send-proxy' param:
+       http://haproxy.1wt.eu/download/1.5/doc/configuration.txt */
+    "tcpProxyProtocol": false,
 
-    /* If a worker is submitting a good deal of invalid shares we can temporarily ban them to
-       reduce system/network load. Also useful to fight against flooding attacks. */
+    /* If a worker is submitting a high threshold of invalid shares we can temporarily ban their IP
+       to reduce system/network load. Also useful to fight against flooding attacks. If running
+       behind something like HAProxy be sure to enable 'tcpProxyProtocol', otherwise you'll end up
+       banning your own IP address (and therefore all workers). */
     "banning": {
         "enabled": true,
         "time": 600, //How many seconds to ban worker for
@@ -191,7 +232,6 @@ var pool = Stratum.createPool({
         }
     },
 
-
     /* Recommended to have at least two daemon instances running in case one drops out-of-sync
        or offline. For redundancy, all instances will be polled for block/transaction updates
        and be used for submitting blocks. Creating a backup daemon involves spawning a daemon
@@ -201,13 +241,13 @@ var pool = Stratum.createPool({
           - https://en.bitcoin.it/wiki/Running_bitcoind */
     "daemons": [
         {   //Main daemon instance
-            "host": "localhost",
+            "host": "127.0.0.1",
             "port": 19332,
             "user": "litecoinrpc",
             "password": "testnet"
         },
         {   //Backup daemon instance
-            "host": "localhost",
+            "host": "127.0.0.1",
             "port": 19344,
             "user": "litecoinrpc",
             "password": "testnet"
@@ -215,23 +255,24 @@ var pool = Stratum.createPool({
     ],
 
 
-    /* This allows the pool to connect to the daemon as a node peer to recieve block updates.
+    /* This allows the pool to connect to the daemon as a node peer to receive block updates.
        It may be the most efficient way to get block updates (faster than polling, less
-       intensive than blocknotify script). However its still under development (not yet working). */
+       intensive than blocknotify script). It requires the additional field "peerMagic" in
+       the coin config. */
     "p2p": {
         "enabled": false,
-        "host": "localhost",
+
+        /* Host for daemon */
+        "host": "127.0.0.1",
+
+        /* Port configured for daemon (this is the actual peer port not RPC port) */
         "port": 19333,
 
-        /* Magic value is different for main/testnet and for each coin. It is found in the daemon
-           source code as the pchMessageStart variable.
-           For example, litecoin mainnet magic: http://git.io/Bi8YFw
-           And for litecoin testnet magic: http://git.io/NXBYJA
-         */
-        "magic": "fcc1b7dc",
+        /* If your coin daemon is new enough (i.e. not a shitcoin) then it will support a p2p
+           feature that prevents the daemon from spamming our peer node with unnecessary
+           transaction data. Assume its supported but if you have problems try disabling it. */
+        "disableTransactions": true
 
-        //Found in src as the PROTOCOL_VERSION variable, for example: http://git.io/KjuCrw
-        "protocolVersion": 70002,
     }
 
 }, function(ip, workerName, password, callback){ //stratum authorization function
@@ -248,16 +289,21 @@ var pool = Stratum.createPool({
 Listen to pool events
 ```javascript
 /*
+
 'data' object contains:
     job: 4, //stratum work job ID
     ip: '71.33.19.37', //ip address of client
+    port: 3333, //port of the client
     worker: 'matt.worker1', //stratum worker name
-    difficulty: 64, //stratum client difficulty
-    reward: 5000000000, //the number of satoshis received as payment for solving this block
     height: 443795, //block height
-    networkDifficulty: 3349 //network difficulty for this block
+    blockReward: 5000000000, //the number of satoshis received as payment for solving this block
+    difficulty: 64, //stratum worker difficulty
+    shareDiff: 78, //actual difficulty of the share
+    blockDiff: 3349, //block difficulty adjusted for share padding
+    blockDiffActual: 3349 //actual difficulty for this block
 
-    //AAK the block solution - set if block was found
+
+    //AKA the block solution - set if block was found
     blockHash: '110c0447171ad819dd181216d5d80f41e9218e25d833a2789cb8ba289a52eee4',
 
     //Exists if "emitInvalidBlockHashes" is set to true
@@ -302,13 +348,14 @@ pool.start();
 
 Credits
 -------
-* [vekexasia](https://github.com/vekexasia) - co-developer & great tester
-* [TheSeven](https://github.com/TheSeven) - answering an absurd amount of my questions, found the block 1-16 problem, provided example code for peer node functionality
+* [vekexasia](//github.com/vekexasia) - co-developer & great tester
+* [LucasJones](//github.com/LucasJones) - got p2p block notify working and implemented additional hashing algos
+* [TheSeven](//github.com/TheSeven) - answering an absurd amount of my questions, found the block 1-16 problem, provided example code for peer node functionality
 * [pronooob](https://dogehouse.org) - knowledgeable & helpful
-* [Slush0](https://github.com/slush0/stratum-mining) - stratum protocol, documentation and original python code
-* [viperaus](https://github.com/viperaus/stratum-mining) - scrypt adaptions to python code
-* [ahmedbodi](https://github.com/ahmedbodi/stratum-mining) - more algo adaptions to python code
-* [steveshit](https://github.com/steveshit) - ported X11 hashing algo from python to node module
+* [Slush0](//github.com/slush0/stratum-mining) - stratum protocol, documentation and original python code
+* [viperaus](//github.com/viperaus/stratum-mining) - scrypt adaptions to python code
+* [ahmedbodi](//github.com/ahmedbodi/stratum-mining) - more algo adaptions to python code
+* [steveshit](//github.com/steveshit) - ported X11 hashing algo from python to node module
 
 
 Donations
